@@ -672,7 +672,7 @@ class RandomInstance:
 
 if __name__ == "__main__":
     # Exemplo de uso
-    instancia = RandomInstance.create_from_csv('instancia_testes.csv')
+    instancia = RandomInstance.create_from_csv('instancia_jobs.csv')
     modelo = CModel(instancia)
     resultado = modelo.run()
     print(f"Resultado final: {resultado}")
