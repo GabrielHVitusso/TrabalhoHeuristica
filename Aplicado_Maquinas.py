@@ -290,101 +290,134 @@ if __name__ == "__main__":
             
             def johnson_hybrid_flowshop(p):
                 """
-                Algoritmo de Johnson adaptado para Hybrid FlowShop com 2 máquinas paralelas no primeiro estágio
-                e 1 máquina no segundo estágio.
-                p: matriz numpy de tempos de processamento (n_jobs x 2), onde a primeira coluna é o tempo no primeiro estágio
-                (máquinas paralelas) e a segunda coluna é o tempo no segundo estágio (única máquina).
-                Retorna: ordem dos jobs e alocação nas máquinas paralelas.
+                Algoritmo de Johnson adaptado para Hybrid FlowShop com 3 centros de máquinas:
+                - Centro 1: 1 máquina (sequencial)
+                - Centro 2: 2 máquinas paralelas
+                - Centro 3: 1 máquina (sequencial)
+                p: matriz numpy de tempos de processamento (n_jobs x 3), colunas: [centro1, centro2, centro3]
+                Retorna:
+                    ordem_final: ordem dos jobs para o centro 3 (sequencial)
+                    maquinas_c2: lista de listas, jobs em cada máquina paralela do centro 2
+                    start_times: matriz (n_jobs x 3) com tempos de início em cada centro
                 """
                 n = p.shape[0]
-                # Ordena os jobs pelo algoritmo de Johnson clássico para 2 máquinas
-                ordem = johnson_flowshop(p)
-                # Aloca os jobs do primeiro estágio nas duas máquinas paralelas de forma balanceada (greedy)
-                maquinas = [[], []]  # listas de jobs para cada máquina paralela
-                tempos_maquinas = [0, 0]  # tempo acumulado em cada máquina
-                for j in ordem:
-                    idx = np.argmin(tempos_maquinas)
-                    maquinas[idx].append(j)
-                    tempos_maquinas[idx] += p[j, 0]
-                # Gera a ordem final dos jobs (mantendo a ordem de chegada em cada máquina paralela)
-                ordem_final = []
-                for m in maquinas:
-                    ordem_final.extend(m)
-                return ordem_final, maquinas
-
-            def plot_gantt_hybrid(ordem, maquinas, p):
-                """
-                Plota o diagrama de Gantt para o Hybrid FlowShop com 2 máquinas paralelas no primeiro estágio
-                e 1 máquina no segundo estágio.
-                ordem: ordem dos jobs para o segundo estágio
-                maquinas: lista de listas, jobs em cada máquina paralela do primeiro estágio
-                p: matriz de tempos de processamento (n_jobs x 2)
-                """
-                import matplotlib.pyplot as plt
-                n = len(ordem)
-                m = p.shape[1]
-                cores = ['tab:blue', 'tab:cyan', 'tab:orange']
-                nomes_maquinas = ['Paralela 1', 'Paralela 2', 'LD']
-                start_times = np.zeros((n, m))
-                # Primeiro estágio: máquinas paralelas
-                fim_maquinas = [0, 0]
-                job_to_machine = {}
-                for m_id, jobs in enumerate(maquinas):
-                    for idx, j in enumerate(jobs):
-                        if idx == 0:
-                            start = 0
-                        else:
-                            start = start_times[jobs[idx-1], 0] + p[jobs[idx-1], 0]
-                        start_times[j, 0] = start
-                        fim_maquinas[m_id] = start + p[j, 0]
-                        job_to_machine[j] = m_id
-                # Segundo estágio: LD (sequencial, ordem dada por 'ordem')
+                # 1. Ordena os jobs pelo algoritmo de Johnson clássico para centros 1 e 3
+                p_johnson = np.column_stack((p[:, 0], p[:, 2]))
+                ordem = johnson_flowshop(p_johnson)
+                # 2. Simula o fluxo:
+                # Centro 1: sequencial, ordem = ordem de Johnson
+                start_times = np.zeros((n, 3))
                 for idx, j in enumerate(ordem):
                     if idx == 0:
-                        start = start_times[j, 0] + p[j, 0]
+                        start_times[j, 0] = 0
                     else:
-                        prev_j = ordem[idx-1]
-                        start = max(start_times[j, 0] + p[j, 0], start_times[prev_j, 1] + p[prev_j, 1])
-                    start_times[j, 1] = start
-                # Monta lista de jobs para plotar
-                jobs_plot = []
-                for m_id in range(2):  # máquinas paralelas
-                    for j in maquinas[m_id]:
-                        jobs_plot.append((m_id, start_times[j, 0], p[j, 0], j))
-                for idx, j in enumerate(ordem):  # LD
-                    jobs_plot.append((2, start_times[j, 1], p[j, 1], j))
-                # Plot
-                _, ax = plt.subplots(figsize=(12, 4))
-                bar_height = 8
-                job_gap = 8
-                for m_id in range(3):
-                    machine_jobs = [(start, duration, j) for mm, start, duration, j in jobs_plot if mm == m_id]
-                    for idx2, (start, duration, j) in enumerate(machine_jobs):
-                        y_base = m_id * (n * (bar_height + job_gap)) + idx2 * (bar_height + job_gap)
-                        ax.broken_barh([(start, duration)], (y_base, bar_height), facecolors=cores[m_id], label=nomes_maquinas[m_id] if idx2 == 0 else "")
-                        ax.text(start + duration/2, y_base + bar_height/2, f'Job {j}', va='center', ha='center', color='white', fontsize=8)
-                ax.set_yticks([])
-                ax.set_yticklabels([])
-                plt.tight_layout()
-                plt.savefig("gantt_hybrid_johnson.png")
-                print("Gantt chart do Hybrid FlowShop salvo como gantt_hybrid_johnson.png")
-                ax.set_xlabel('Tempo')
-                ax.set_title('Diagrama de Gantt (Hybrid FlowShop Johnson)')
-                ax.grid(True)
-                handles, labels = ax.get_legend_handles_labels()
-                by_label = dict(zip(labels, handles))
-                ax.legend(by_label.values(), by_label.keys())
-                plt.tight_layout()
-                plt.show()
+                        prev_j = ordem[idx - 1]
+                        start_times[j, 0] = start_times[prev_j, 0] + p[prev_j, 0]
+                # 3. Centro 2: 2 máquinas paralelas, alocação greedy conforme chegada do centro 1
+                maquinas_c2 = [[], []]
+                fim_maquinas_c2 = [0, 0]
+                for j in ordem:
+                    ready_time = start_times[j, 0] + p[j, 0]
+                    idx_m = np.argmin([max(fim_maquinas_c2[m], ready_time) for m in range(2)])
+                    start_times[j, 1] = max(fim_maquinas_c2[idx_m], ready_time)
+                    fim_maquinas_c2[idx_m] = start_times[j, 1] + p[j, 1]
+                    maquinas_c2[idx_m].append(j)
+                # 4. Centro 3: sequencial, ordem = ordem de Johnson
+                for idx, j in enumerate(ordem):
+                    ready_time = start_times[j, 1] + p[j, 1]
+                    if idx == 0:
+                        start_times[j, 2] = ready_time
+                    else:
+                        prev_j = ordem[idx - 1]
+                        start_times[j, 2] = max(ready_time, start_times[prev_j, 2] + p[prev_j, 2])
+                return ordem, maquinas_c2, start_times
 
+            def plot_gantt_hybrid(ordem, maquinas, p):
+                                """
+                                Plota o diagrama de Gantt para o Hybrid FlowShop com 3 centros de máquinas,
+                                sendo o segundo centro com 2 máquinas paralelas.
+                                ordem: ordem dos jobs para o terceiro centro (sequencial)
+                                maquinas: lista de listas, jobs em cada máquina paralela do segundo centro
+                                p: matriz de tempos de processamento (n_jobs x 3)
+                                """
+                                import matplotlib.pyplot as plt
+                                n = len(ordem)
+                                m = p.shape[1]
+                                cores = ['tab:orange', 'tab:cyan', 'tab:blue', 'tab:green']
+                                nomes_maquinas = ['Alto Forno', 'Paralela 1 (Centro 2)', 'Paralela 2 (Centro 2)', 'LD']
+                                start_times = np.zeros((n, m))
+                                # Centro 1: sequencial, ordem = ordem de Johnson
+                                for idx, j in enumerate(ordem):
+                                    if idx == 0:
+                                        start_times[j, 0] = 0
+                                    else:
+                                        prev_j = ordem[idx - 1]
+                                        start_times[j, 0] = start_times[prev_j, 0] + p[prev_j, 0]
+                                # Centro 2: 2 máquinas paralelas, alocação conforme 'maquinas'
+                                fim_maquinas_c2 = [0, 0]
+                                for m_id, jobs in enumerate(maquinas):
+                                    for idx, j in enumerate(jobs):
+                                        ready_time = start_times[j, 0] + p[j, 0]
+                                        if idx == 0:
+                                            start = ready_time
+                                        else:
+                                            start = max(fim_maquinas_c2[m_id], ready_time)
+                                        start_times[j, 1] = start
+                                        fim_maquinas_c2[m_id] = start + p[j, 1]
+                                # Centro 3: sequencial, ordem = ordem de Johnson
+                                for idx, j in enumerate(ordem):
+                                    ready_time = start_times[j, 1] + p[j, 1]
+                                    if idx == 0:
+                                        start_times[j, 2] = ready_time
+                                    else:
+                                        prev_j = ordem[idx - 1]
+                                        start_times[j, 2] = max(ready_time, start_times[prev_j, 2] + p[prev_j, 2])
+                                # Monta lista de jobs para plotar
+                                jobs_plot = []
+                                # Centro 1 (sequencial)
+                                for idx, j in enumerate(ordem):
+                                    jobs_plot.append((0, start_times[j, 0], p[j, 0], j))
+                                # Centro 2 (paralelo)
+                                for m_id in range(2):
+                                    for j in maquinas[m_id]:
+                                        jobs_plot.append((m_id + 1, start_times[j, 1], p[j, 1], j))
+                                # Centro 3 (sequencial)
+                                for idx, j in enumerate(ordem):
+                                    jobs_plot.append((3, start_times[j, 2], p[j, 2], j))
+                                # Plot
+                                _, ax = plt.subplots(figsize=(12, 5))
+                                bar_height = 8
+                                job_gap = 8
+                                for m_id in range(4):
+                                    machine_jobs = [(start, duration, j) for mm, start, duration, j in jobs_plot if mm == m_id]
+                                    for idx2, (start, duration, j) in enumerate(machine_jobs):
+                                        y_base = m_id * (n * (bar_height + job_gap)) + idx2 * (bar_height + job_gap)
+                                        color = cores[m_id] if m_id < len(cores) else 'gray'
+                                        label = nomes_maquinas[m_id] if idx2 == 0 else ""
+                                        ax.broken_barh([(start, duration)], (y_base, bar_height), facecolors=color, label=label)
+                                        ax.text(start + duration/2, y_base + bar_height/2, f'Job {j}', va='center', ha='center', color='white', fontsize=8)
+                                ax.set_yticks([])
+                                ax.set_yticklabels([])
+                                plt.tight_layout()
+                                plt.savefig("gantt_hybrid_johnson.png")
+                                print("Gantt chart do Hybrid FlowShop salvo como gantt_hybrid_johnson.png")
+                                ax.set_xlabel('Tempo')
+                                ax.set_title('Diagrama de Gantt (Hybrid FlowShop Johnson)')
+                                ax.grid(True)
+                                handles, labels = ax.get_legend_handles_labels()
+                                by_label = dict(zip(labels, handles))
+                                ax.legend(by_label.values(), by_label.keys())
+                                plt.tight_layout()
+                                plt.show()
+            
             # Exemplo de uso do algoritmo Hybrid FlowShop Johnson:
             if __name__ == "__main__":
-                # Supondo que queremos aplicar Hybrid Johnson para as duas primeiras máquinas (primeira é paralela)
-                p2 = instancia.p[:, :2]
-                ordem_hybrid, maquinas_hybrid = johnson_hybrid_flowshop(p2)
+                # Supondo que queremos aplicar Hybrid Johnson para o caso em que somente a segunda máquina é paralela
+                p3 = instancia.p  # matriz completa de 3 colunas
+                ordem_hybrid, maquinas_hybrid, start_times_hybrid = johnson_hybrid_flowshop(p3)
                 print("Ordem dos jobs para o segundo estágio (LD):", ordem_hybrid)
                 print("Alocação dos jobs nas máquinas paralelas do primeiro estágio:", maquinas_hybrid)
-                plot_gantt_hybrid(ordem_hybrid, maquinas_hybrid, p2)
+                plot_gantt_hybrid(ordem_hybrid, maquinas_hybrid, p3)
                 
                 def random_swap_in_tail_hybrid(ordem, maquinas, num_swaps=1, tail_size=2, seed=None):
                     """
@@ -414,7 +447,7 @@ if __name__ == "__main__":
                     # Troca aleatória na cauda da solução híbrida de Johnson
                     ordem_hybrid_swapped = random_swap_in_tail_hybrid(ordem_hybrid, maquinas_hybrid, num_swaps=1, tail_size=3, seed=42)
                     print("Ordem após troca aleatória na cauda (Hybrid):", ordem_hybrid_swapped)
-                    plot_gantt_hybrid(ordem_hybrid_swapped, maquinas_hybrid, p2)
+                    plot_gantt_hybrid(ordem_hybrid_swapped, maquinas_hybrid, p3)
                     
                     
                     def vns_hybrid_johnson(p, max_iter=100, tail_sizes=[2, 3, 4], seed=None):
@@ -430,7 +463,7 @@ if __name__ == "__main__":
                             random.seed(seed)
                             np.random.seed(seed)
                         # Solução inicial pelo Hybrid Johnson
-                        ordem, maquinas = johnson_hybrid_flowshop(p)
+                        ordem, maquinas, start_Temps = johnson_hybrid_flowshop(p)
                         best_ordem = ordem.copy()
                         best_maquinas = [m.copy() for m in maquinas]
                         best_makespan = None
@@ -480,9 +513,9 @@ if __name__ == "__main__":
 
                     # Exemplo de uso do VNS para Hybrid Johnson:
                     if __name__ == "__main__":
-                        p2 = instancia.p[:, :2]
-                        ordem_vns, maquinas_vns, makespan_vns = vns_hybrid_johnson(p2, max_iter=50, tail_sizes=[2, 3, 4], seed=123)
+                        p3 = instancia.p  # matriz completa de 3 colunas
+                        ordem_vns, maquinas_vns, makespan_vns = vns_hybrid_johnson(p3, max_iter=50, tail_sizes=[2, 3, 4], seed=123)
                         print("Ordem final pelo VNS (Hybrid Johnson):", ordem_vns)
                         print("Alocação nas máquinas paralelas:", maquinas_vns)
                         print("Makespan final:", makespan_vns)
-                        plot_gantt_hybrid(ordem_vns, maquinas_vns, p2)
+                        plot_gantt_hybrid(ordem_vns, maquinas_vns, p3)
